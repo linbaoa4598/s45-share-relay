@@ -185,3 +185,48 @@ test('actual app uses cached portraits, ID fallback and clears late image loads'
  connection.onmessage({data:JSON.stringify(data)});assert.equal(images.length,2);assert.equal(draws.length,0);
  nodes.get('leave').onclick();images[0].onload();assert.equal(draws.length,0);
 });
+
+test('wild calibration keeps duplicate IDs separate across reordered frames',()=>{
+ const {WildCalibration}=require('./protocol'),c=new WildCalibration();
+ const a={field3:266008,x:30,y:40},b={field3:266008,x:240,y:250};
+ const first=c.bind([a,b]);assert.notEqual(first[0].key,first[1].key);c.move(first[0].key,25,-15);
+ const next=c.bind([b,{...a,x:31,y:40}]);assert.equal(next[1].key,first[0].key);assert.equal(next[0].key,first[1].key);
+ const cfg={left:0,top:0,size:680,flip:false};assert.deepEqual(c.point(next[1],cfg),[56,25]);assert.deepEqual(c.point(next[0],cfg).map(v=>Number(v.toFixed(8))),[240,250]);
+ const restored=new WildCalibration(JSON.parse(JSON.stringify(c)));assert.equal(restored.anchors[0].dx,25);
+ restored.reset(0);assert.equal(restored.anchors[0].dx,0);assert.equal(restored.move(0,Infinity,0),false);
+ assert.equal(new WildCalibration({anchors:[{id:1,x:0,y:0,dx:1e20,dy:0}]}).anchors.length,0);
+});
+test('wild layout zoom changes positions only and marker zoom stays independent',()=>{
+ const {WildCalibration}=require('./protocol'),c=new WildCalibration(),b=c.bind([{field3:1,x:100,y:120}])[0],cfg={left:0,top:0,size:680,flip:false};
+ c.markerScale=3;assert.deepEqual(c.point(b,cfg),[100,120]);c.layoutScale=0.5;assert.deepEqual(c.point(b,cfg),[220,230]);
+ c.move(b.key,10,-10);assert.deepEqual(c.point(b,cfg),[230,220]);
+ assert.equal(new WildCalibration({markerScale:100,layoutScale:-1}).markerScale,3);assert.equal(new WildCalibration({layoutScale:-1}).layoutScale,0.5);
+});
+test('wild editor pointer drag, input editing and per-room browser persistence',()=>{
+ const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path'),nodes=new Map(),store=new Map();
+ const html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8');
+ const ctx={clearRect(){},beginPath(){},arc(){},fill(){},stroke(){},fillText(){},fillRect(){}};
+ for(const tag of html.match(/<[^>]+id="[^"]+"[^>]*>/g)){
+  const id=/id="([^"]+)"/.exec(tag)[1],value=/value="([^"]*)"/.exec(tag)?.[1]||'';
+  nodes.set(id,{value,checked:false,textContent:'',dataset:{},style:{},replaceChildren(){},append(){},getContext(){return ctx;}});
+ }
+ nodes.get('minionMode').value='world';nodes.get('minionDirection').value='auto';
+ const canvas=nodes.get('map');canvas.width=680;canvas.height=680;canvas.getBoundingClientRect=()=>({left:0,top:0,width:340,height:340});canvas.setPointerCapture=()=>{};
+ let connection;class Socket{static OPEN=1;constructor(){this.readyState=1;connection=this;}send(){}close(){}}
+ const sandbox={document:{getElementById(id){assert.ok(nodes.has(id),id);return nodes.get(id);},createElement(){return {append(){}};}},location:{protocol:'http:',host:'localhost'},localStorage:{getItem:k=>store.get(k)||null,setItem:(k,v)=>store.set(k,v)},WebSocket:Socket,URL,ShareProtocol:require('./protocol'),setInterval(){},setTimeout(){},clearTimeout(){},alert(){throw Error('unexpected alert');}};
+ vm.runInNewContext(fs.readFileSync(path.join(__dirname,'app.js'),'utf8'),sandbox);
+ nodes.get('room').value='123456';nodes.get('join').onclick();
+ const frame={type:'frame',protocol:'original-s45',room:'123456',actors:[],monsters:[{field2:70,field3:266008,x:155.892857,y:155.892857}],minions:[]};
+ const update=()=>connection.onmessage({data:JSON.stringify(frame)});update();
+ nodes.get('wildEdit').checked=true;nodes.get('wildEdit').onchange();
+ const event=(x,y)=>({clientX:x,clientY:y,pointerId:1,button:0,preventDefault(){}});
+ canvas.onpointerdown(event(170,170));canvas.onpointermove(event(180,175));canvas.onpointerup(event(180,175));
+ assert.equal(Number(nodes.get('wildX').value),360);assert.equal(Number(nodes.get('wildY').value),350);
+ nodes.get('wildX').value='400';nodes.get('wildY').value='410';nodes.get('wildX').oninput();update();assert.equal(nodes.get('wildX').value,'400');
+ nodes.get('wildApply').onclick();assert.equal(Number(nodes.get('wildX').value),400);assert.equal(Number(nodes.get('wildY').value),410);
+ nodes.get('wildNudgeRight').onclick();assert.equal(Number(nodes.get('wildX').value),401);
+ assert.ok(store.has('s45-wild-v1:localhost:123456'));
+ nodes.get('room').value='654321';nodes.get('join').onclick();frame.room='654321';update();assert.equal(nodes.get('wildX').disabled,true);nodes.get('wildSelect').value='0';nodes.get('wildSelect').onchange();assert.equal(Number(nodes.get('wildX').value),340);
+ nodes.get('room').value='123456';nodes.get('join').onclick();frame.room='123456';update();nodes.get('wildSelect').value='0';nodes.get('wildSelect').onchange();assert.equal(Number(nodes.get('wildX').value),401);
+ nodes.get('wildResetOne').onclick();assert.equal(Number(nodes.get('wildX').value),340);
+});

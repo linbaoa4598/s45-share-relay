@@ -70,5 +70,38 @@ function projectMinion(m,c,outputWidth,direction,mode='world'){
  let x=0.5+wx*direction/c.size,y=0.5-wy*direction/c.size;
  if(c.flip){x=1-x;y=1-y;}return [x*680,y*680];
 }
-return {Decoder,parseFrame,project,minionDirection,projectMinion,MAX_BUFFER};
+// Client-only calibration. Identity uses kind + a spatial anchor, never array order.
+class WildCalibration{
+ constructor(data={}){
+  this.markerScale=Number.isFinite(data.markerScale)?Math.max(0.5,Math.min(3,data.markerScale)):1;
+  this.layoutScale=Number.isFinite(data.layoutScale)?Math.max(0.5,Math.min(2,data.layoutScale)):1;
+  this.anchors=[];
+  if(Array.isArray(data.anchors))for(const a of data.anchors.slice(0,256)){
+   if(a&&[a.id,a.x,a.y,a.dx,a.dy].every(Number.isFinite)&&Math.abs(a.x)<1e7&&Math.abs(a.y)<1e7&&Math.abs(a.dx)<=10000&&Math.abs(a.dy)<=10000)
+    this.anchors.push({id:a.id,x:a.x,y:a.y,dx:a.dx,dy:a.dy});
+  }
+ }
+ bind(monsters){
+  const used=new Set();return monsters.map(m=>{
+   let key=-1,best=24*24;
+   for(let i=0;i<this.anchors.length;i++){
+    const a=this.anchors[i],distance=(a.x-m.x)**2+(a.y-m.y)**2;
+    if(!used.has(i)&&a.id===m.field3&&distance<best){key=i;best=distance;}
+   }
+   if(key<0&&this.anchors.length<256){key=this.anchors.length;this.anchors.push({id:m.field3,x:m.x,y:m.y,dx:0,dy:0});}
+   if(key>=0)used.add(key);return {key,monster:m};
+  });
+ }
+ point(bound,c){
+  const [x,y]=project(bound.monster.x,bound.monster.y,c),a=this.anchors[bound.key];
+  return [340+(x-340)*this.layoutScale+(a?.dx||0),340+(y-340)*this.layoutScale+(a?.dy||0)];
+ }
+ move(key,dx,dy){
+  const a=this.anchors[key];if(!a||![dx,dy].every(Number.isFinite)||Math.abs(dx)>10000||Math.abs(dy)>10000)return false;
+  a.dx=dx;a.dy=dy;return true;
+ }
+ reset(key){return this.move(key,0,0);}
+ toJSON(){return {markerScale:this.markerScale,layoutScale:this.layoutScale,anchors:this.anchors};}
+}
+return {Decoder,parseFrame,project,minionDirection,projectMinion,WildCalibration,MAX_BUFFER};
 });
