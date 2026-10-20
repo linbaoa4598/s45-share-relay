@@ -37,7 +37,7 @@ function render(){
   const row=document.createElement('div');row.className='hero';
   const name=document.createElement('strong'),data=document.createElement('span');
   name.textContent='#'+h.id+' · '+h.hp+'/'+h.maxHp;
-  data.textContent='F4: '+h.field4+' / F5: '+h.field5+' / F8: '+h.field8+' / F9: '+h.field9;
+  data.textContent='F4: '+h.field4+' / F5: '+h.field5+' / F8: '+h.field8+' / F9: '+h.field9+(h.field10===null?'':' / F10: '+h.field10);
   row.append(name,data);$('heroes').append(row);
  }
  if(!frame.actors.length)$('heroes').textContent='本帧无上传英雄';

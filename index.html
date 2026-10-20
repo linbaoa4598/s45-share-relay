@@ -6,7 +6,7 @@
 <body><main><header><h1>原项目 S45 · 实时共享</h1><span id="status" role="status">正在连接…</span></header>
 <div class="layout"><section><div class="panel"><canvas id="map" width="680" height="680" aria-label="对局小地图"></canvas><p id="freshness" class="muted">请选择六位数字房间号。</p></div>
 <div class="panel"><details><summary>原项目坐标校准与连接设置</summary>
-<p class="muted">对接 原项目 S45，人物 9 列 / 野怪 5 列 / 兵线 3 列。按原项目“共享输出宽度”计算人物/野怪边长，偏移分别填写原配置中小地图、野怪、兵线的左右/上下调整。非手机分辨率。</p>
+<p class="muted">对接 原项目 S45，人物 10 列（兼容旧重建 9 列） / 野怪 5 列 / 兵线 3 列。按原项目“共享输出宽度”计算人物/野怪边长，偏移分别填写原配置中小地图、野怪、兵线的左右/上下调整。非手机分辨率。</p>
 <div class="row"><label>共享输出宽度<input id="width" type="number" value="2400" min="320" max="7680"></label><button id="calculate">计算人物/野怪边长</button></div>
 <strong>人物</strong><div class="row"><label>左<input id="actorLeft" type="number" value="0"></label><label>上<input id="actorTop" type="number" value="0"></label><label>边长<input id="actorSize" type="number" value="311.785714" min="1" step="0.01"></label></div>
 <strong>野怪</strong><div class="row"><label>左<input id="wildLeft" type="number" value="0"></label><label>上<input id="wildTop" type="number" value="0"></label><label>边长<input id="wildSize" type="number" value="311.785714" min="1" step="0.01"></label></div>
@@ -17,4 +17,4 @@
 </details></div></section>
 <aside><div class="panel"><h2>共享房间</h2><div class="row"><input id="room" aria-label="六位房间号" placeholder="六位数字房间号" maxlength="6" inputmode="numeric"><button id="join">进入</button><button id="leave">离开</button></div><div id="rooms">暂无房间</div></div>
 <div class="panel"><h2>英雄状态 · 原始字段</h2><div id="heroes" class="muted">暂无数据</div></div>
-<div class="panel muted"><strong>原项目协议</strong><p>仅三组，没有末尾阵营或旋转段。不将人物 F9 当作阵营；未确认的 F4/F5/F8/F9 保留原值，不猜测 CD 单位。</p><p>野怪显示原始 F2/F3，不套用移植版固定 70 的规则。兵线按实际上传绘制，绿色仅为标记颜色，不代表阵营。</p><p>原协议没有帧结束符，中转需等下一帧头或正常断开才能确定上一帧，通常延迟一帧。</p><p>重建工程当前 UI 仅支持手工提交完整帧；自动采集到共享打包尚未接通。本网页不代表该部分已经完成。</p></div></aside></div></main></body></html>
+<div class="panel muted"><strong>原项目协议</strong><p>仅三组，没有末尾阵营或旋转段。不将人物 F9 当作阵营；未确认的 F4/F5/F8/F9/F10 保留原值，不猜测 CD 单位。</p><p>野怪显示原始 F2/F3，不套用移植版固定 70 的规则。兵线按实际上传绘制，绿色仅为标记颜色，不代表阵营。</p><p>原协议没有帧结束符，中转需等下一帧头或正常断开才能确定上一帧，通常延迟一帧。</p><p>重建工程当前 UI 仅支持手工提交完整帧；自动采集到共享打包尚未接通。本网页不代表该部分已经完成。</p></div></aside></div></main></body></html>

@@ -3,7 +3,7 @@ const test=require('node:test'),assert=require('node:assert/strict'),net=require
 const {once}=require('node:events');
 const {Decoder,parseFrame,project,MAX_BUFFER}=require('./protocol'),{createBridge,optionsFromEnvironment}=require('./server');
 const raw='gameData123456[==][==]105,1000,2000,8192000,0,136,136,50,0==---0,10,60,200,200==---100,100,2==120,120,1==';
-test('original S45: exactly three groups and 9/5/3 columns',()=>{
+test('legacy reconstructed 9-column frame stays compatible',()=>{
  const f=parseFrame(raw);assert.equal(f.room,'123456');assert.equal(f.protocol,'original-s45');
  assert.equal(f.actors[0].field4,8192000);assert.equal(f.actors[0].field9,0);assert.equal(f.actors[0].camp,undefined);
  assert.equal(f.actors[0].percent,50);assert.equal(f.monsters[0].field3,60);assert.equal(f.minions.length,2);
@@ -77,4 +77,33 @@ test('HTTP resources and WebSocket work without credentials',async t=>{
  const ws=new WebSocket(base.replace('http:','ws:')+'/ws'),next=inbox(ws);t.after(()=>ws.close());await once(ws,'open');
  assert.equal((await next(m=>m.type==='rooms')).type,'rooms');
  ws.send(JSON.stringify({type:'subscribe',room:'123456'}));assert.equal((await next(m=>m.type==='subscribed')).room,'123456');
+});
+
+const battle=raw.replace('136,136,50,0==','-20,136,50.000000,7,257==');
+test('original battle frame has ten columns including float F8',()=>{
+ const f=parseFrame(battle);assert.equal(f.actors[0].raw.length,10);assert.equal(f.actors[0].x,-20);assert.equal(f.actors[0].field8,50);assert.equal(f.actors[0].field9,7);assert.equal(f.actors[0].field10,257);
+ for(let i=0;i<=battle.length;i++){
+  const d=new Decoder();const frames=[...d.push(battle.slice(0,i)),...d.push(battle.slice(i)+battle),...d.finish()];assert.equal(frames.length,2);
+ }
+});
+test('original %f non-finite opaque F8 stays raw without serializing NaN',()=>{
+ for(const value of ['nan','-nan','inf','-inf','+inf']){
+  const f=parseFrame(battle.replace('50.000000',value));assert.equal(f.actors[0].field8,null);assert.equal(f.actors[0].raw[7],value);assert.equal(JSON.parse(JSON.stringify(f)).actors[0].field8,null);
+ }
+});
+test('bad delimited frame is discarded without losing later good frames',()=>{
+ const errors=[],d=new Decoder(e=>errors.push(e.message));
+ const frames=d.push(battle+raw.replace('105,1000','105,broken')+battle+battle);
+ assert.equal(frames.length,2);assert.equal(d.rejected,1);assert.match(errors[0],/actors/);assert.equal(d.finish().length,1);
+});
+test('lobby to battle on same TCP connection does not reconnect',async t=>{
+ const diagnostics=[],bridge=createBridge({httpPort:0,tcpPort:0,onDiagnostic:d=>diagnostics.push(d)});await bridge.listen();t.after(()=>bridge.close());
+ const ws=new WebSocket('ws://127.0.0.1:'+bridge.web.address().port+'/ws'),next=inbox(ws);t.after(()=>ws.close());await once(ws,'open');
+ ws.send(JSON.stringify({type:'subscribe',room:'123456'}));await next(m=>m.type==='subscribed');
+ const tcp=net.connect(bridge.tcp.address().port,'127.0.0.1');await once(tcp,'connect');t.after(()=>tcp.destroy());
+ tcp.write('gameData123456[==][==]------'+battle+battle);
+ assert.equal((await next(m=>m.type==='frame'&&m.actors.length===1)).actors[0].raw.length,10);
+ const bad=battle.replace('105,1000','105,broken');tcp.write(bad+battle+battle);
+ await delay(40);assert.equal(tcp.destroyed,false);assert.equal(bridge.metrics.tcpFatal,0);assert.equal(bridge.metrics.rejected,1);assert.ok(bridge.metrics.accepted>=4);assert.equal(diagnostics[0].event,'frame_rejected');
+ tcp.write(battle);assert.equal((await next(m=>m.type==='frame'&&m.actors.length===1)).actors[0].field10,257);
 });

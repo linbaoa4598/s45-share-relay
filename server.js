@@ -6,6 +6,13 @@ const MAX=1024*1024;
 function createBridge(options={}){
  const rooms=new Map(),clients=new Set(),publishers=new Set();
  const ttl=options.ttl??10000;
+ const metrics={accepted:0,rejected:0,tcpFatal:0};let warnings=0,lastWarning=0;
+ function diagnose(event,error){
+  const now=Date.now();if(warnings>=5&&now-lastWarning<30000)return;
+  ++warnings;lastWarning=now;
+  const detail={event,message:String(error.message||error).slice(0,120)};
+  if(options.onDiagnostic)options.onDiagnostic(detail);else console.warn('[s45-share]',JSON.stringify(detail));
+ }
  function active(){const now=Date.now();return [...rooms.values()].filter(r=>now-r.time<ttl);}
  function wsSend(s,obj){
   if(s.destroyed||s.writableLength>MAX){s.destroy();return;}
@@ -74,15 +81,16 @@ function createBridge(options={}){
  function publish(s,items){
   for(const {frame}of items){
    if(!rooms.has(frame.room)&&rooms.size>=1000)throw Error('room limit');
+   ++metrics.accepted;
    rooms.set(frame.room,{frame,time:Date.now(),owner:s});
    for(const c of clients)if(c.room===frame.room)wsSend(c,frame);
   }
  }
  const tcp=net.createServer(s=>{
-  publishers.add(s);s.setTimeout(30000,()=>s.destroy());s.setEncoding('utf8');
-  const decoder=new Decoder();let ended=false;
-  s.on('data',data=>{try{publish(s,decoder.push(data));}catch{s.destroy();}});
-  s.on('end',()=>{try{publish(s,decoder.finish());ended=true;}catch{s.destroy();}});
+  publishers.add(s);s.setTimeout(30000,()=>{diagnose('tcp_idle',Error('30s without upload'));s.destroy();});s.setEncoding('utf8');
+  const decoder=new Decoder(error=>{++metrics.rejected;diagnose('frame_rejected',error);});let ended=false;
+  s.on('data',data=>{try{publish(s,decoder.push(data));}catch(error){++metrics.tcpFatal;diagnose('tcp_fatal',error);s.destroy();}});
+  s.on('end',()=>{try{publish(s,decoder.finish());ended=true;}catch(error){++metrics.rejected;diagnose('eof_rejected',error);s.destroy();}});
   s.on('error',()=>{});
   s.on('close',()=>{
    publishers.delete(s);
@@ -93,7 +101,7 @@ function createBridge(options={}){
   const now=Date.now();for(const [id,r]of rooms)if(now-r.time>=ttl)rooms.delete(id);
   for(const c of clients)roomList(c);
  },Math.min(1000,ttl));timer.unref();
- return {web,tcp,rooms,
+ return {web,tcp,rooms,metrics,
   async listen(){await new Promise((r,j)=>{web.once('error',j);web.listen(options.httpPort??8888,options.host??'127.0.0.1',r);});try{await new Promise((r,j)=>{tcp.once('error',j);tcp.listen(options.tcpPort??9999,options.host??'127.0.0.1',r);});}catch(e){web.close();clearInterval(timer);throw e;}return this;},
   async close(){clearInterval(timer);for(const s of clients)s.destroy();for(const s of publishers)s.destroy();await Promise.all([new Promise(r=>web.close(r)),new Promise(r=>tcp.close(r))]);}
  };
