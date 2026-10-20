@@ -6,15 +6,6 @@ const MAX=1024*1024;
 function createBridge(options={}){
  const rooms=new Map(),clients=new Set(),publishers=new Set();
  const ttl=options.ttl??10000;
- const auth=options.webPassword?crypto.createHash('sha256').update((options.webUser||'viewer')+':'+options.webPassword).digest():null;
- function authorized(req){
-  if(!auth)return true;
-  const h=req.headers.authorization;
-  if(!h||!h.startsWith('Basic ')||h.length>8192)return false;
-  const supplied=crypto.createHash('sha256').update(Buffer.from(h.slice(6),'base64')).digest();
-  return crypto.timingSafeEqual(auth,supplied);
- }
-
  function active(){const now=Date.now();return [...rooms.values()].filter(r=>now-r.time<ttl);}
  function wsSend(s,obj){
   if(s.destroyed||s.writableLength>MAX){s.destroy();return;}
@@ -37,7 +28,6 @@ function createBridge(options={}){
  const publicFiles=new Map([['/','index.html'],['/index.html','index.html'],['/app.js','app.js'],['/protocol.js','protocol.js'],['/map.png','map.png']]);
  const web=http.createServer((req,res)=>{
   if(req.url==='/healthz'){res.writeHead(200,{'Content-Type':'text/plain','Cache-Control':'no-store'});res.end('ok');return;}
-  if(!authorized(req)){res.writeHead(401,{'WWW-Authenticate':'Basic realm="S45 share", charset="UTF-8"','Cache-Control':'no-store'});res.end('Authentication required');return;}
   const f=publicFiles.get(req.url.split('?')[0]);
   if(!f){res.writeHead(404);res.end('Not found');return;}
   fs.readFile(path.join(__dirname,f),(e,data)=>{
@@ -48,7 +38,6 @@ function createBridge(options={}){
   });
  });
  web.on('upgrade',(req,s,head)=>{
-  if(!authorized(req)){s.end('HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm="S45 share"\r\nConnection: close\r\n\r\n');return;}
   const key=req.headers['sec-websocket-key'];
   if(req.url!=='/ws'||req.headers.upgrade?.toLowerCase()!=='websocket'||req.headers['sec-websocket-version']!=='13'||!key||Buffer.from(key,'base64').length!==16){s.destroy();return;}
   // Reject cross-origin browser access to this otherwise unauthenticated relay.
@@ -111,12 +100,9 @@ function createBridge(options={}){
 }
 function optionsFromEnvironment(env){
  function port(value,fallback){const n=Number(value??fallback);if(!Number.isInteger(n)||n<1||n>65535)throw Error('invalid listening port');return n;}
- const production=env.NODE_ENV==='production'||!!env.RAILWAY_ENVIRONMENT_ID;
- if(production&&(!env.WEB_PASSWORD||env.WEB_PASSWORD.length<16))throw Error('Set WEB_PASSWORD to at least 16 characters before deployment');
- if((env.WEB_USER||'viewer').includes(':'))throw Error('WEB_USER cannot include a colon');
  const httpPort=port(env.HTTP_PORT??env.PORT,8888),tcpPort=port(env.TCP_PORT,9999);
  if(httpPort===tcpPort)throw Error('HTTP and TCP ports must differ');
- return {host:env.HOST||(env.PORT?'0.0.0.0':'127.0.0.1'),httpPort,tcpPort,webUser:env.WEB_USER||'viewer',webPassword:env.WEB_PASSWORD||''};
+ return {host:env.HOST||(env.PORT?'0.0.0.0':'127.0.0.1'),httpPort,tcpPort};
 }
 if(require.main===module){
  let opts;try{opts=optionsFromEnvironment(process.env);}catch(e){console.error(e.message);process.exit(1);}

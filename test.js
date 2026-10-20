@@ -62,24 +62,19 @@ test('malformed publisher does not terminate relay',async t=>{
  assert.equal((await fetch('http://127.0.0.1:'+bridge.web.address().port+'/')).status,200);
 });
 
-test('Railway port environment and fail-closed production auth',()=>{
- assert.equal(optionsFromEnvironment({PORT:'3000'}).httpPort,3000);
- assert.equal(optionsFromEnvironment({PORT:'3000'}).host,'0.0.0.0');
- assert.equal(optionsFromEnvironment({}).host,'127.0.0.1');
- for(const env of [{NODE_ENV:'production'},{RAILWAY_ENVIRONMENT_ID:'x'},{PORT:'bad'},{PORT:'9999'},{PORT:'0'}])assert.throws(()=>optionsFromEnvironment(env));
- assert.equal(optionsFromEnvironment({NODE_ENV:'production',WEB_PASSWORD:'synthetic-test-only-password'}).webUser,'viewer');
-});
-test('HTTP and WebSocket require password; health stays public',async t=>{
- const bridge=createBridge({httpPort:0,tcpPort:0,webPassword:'synthetic-test-only-password'});await bridge.listen();t.after(()=>bridge.close());
- const base='http://127.0.0.1:'+bridge.web.address().port;
- assert.equal((await fetch(base+'/healthz')).status,200);
- assert.equal((await fetch(base+'/')).status,401);
- assert.equal((await fetch(base+'/app.js')).status,401);
- const authorization='Basic '+Buffer.from('viewer:synthetic-test-only-password').toString('base64');
- assert.equal((await fetch(base+'/',{headers:{authorization}})).status,200);
- for(const auth of ['',authorization]){
-  const s=net.connect(bridge.web.address().port,'127.0.0.1');await once(s,'connect');let text='';s.on('data',d=>text+=d);
-  s.write('GET /ws HTTP/1.1\r\nHost: 127.0.0.1\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n'+(auth?'Authorization: '+auth+'\r\n':'')+'\r\n');
-  await delay(40);assert.match(text,auth?/101 Switching Protocols/:/401 Unauthorized/);s.destroy();
+test('Railway production starts without password variables',()=>{
+ for(const env of [{NODE_ENV:'production',PORT:'3000'},{RAILWAY_ENVIRONMENT_ID:'x',PORT:'3000'},{NODE_ENV:'production',PORT:'3000',WEB_PASSWORD:'old-ignored-value'}]){
+  const opts=optionsFromEnvironment(env);assert.equal(opts.httpPort,3000);assert.equal(opts.host,'0.0.0.0');assert.equal(opts.webPassword,undefined);
  }
+ for(const env of [{PORT:'bad'},{PORT:'9999'},{PORT:'0'}])assert.throws(()=>optionsFromEnvironment(env));
+});
+test('HTTP resources and WebSocket work without credentials',async t=>{
+ const bridge=createBridge({httpPort:0,tcpPort:0,webPassword:'old-ignored-value'});await bridge.listen();t.after(()=>bridge.close());
+ const base='http://127.0.0.1:'+bridge.web.address().port;
+ for(const resource of ['/','/healthz','/app.js','/protocol.js','/map.png']){
+  const response=await fetch(base+resource);assert.equal(response.status,200);assert.equal(response.headers.get('www-authenticate'),null);
+ }
+ const ws=new WebSocket(base.replace('http:','ws:')+'/ws'),next=inbox(ws);t.after(()=>ws.close());await once(ws,'open');
+ assert.equal((await next(m=>m.type==='rooms')).type,'rooms');
+ ws.send(JSON.stringify({type:'subscribe',room:'123456'}));assert.equal((await next(m=>m.type==='subscribed')).room,'123456');
 });
