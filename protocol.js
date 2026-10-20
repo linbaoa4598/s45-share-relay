@@ -54,5 +54,21 @@ function project(x,y,c,actor=false){
  let px=(x+(actor?20:0)-c.left)/c.size,py=(y+(actor?20:0)-c.top)/c.size;
  if(c.flip){px=1-px;py=1-py;}return [px*680,py*680];
 }
-return {Decoder,parseFrame,project,MAX_BUFFER};
+// 0x1b02644 sends int(world * outputWidth/2400) + minion offset,
+// unlike heroes/monsters which have already been projected to the minimap.
+function minionDirection(minions,override='auto'){
+ if(override==='1'||override==='-1')return Number(override);
+ const camps=new Set(minions.map(m=>m.field3).filter(c=>c===1||c===2));
+ // Original loop sends only the enemy camp. Local 1 -> +1, local 2 -> -1.
+ return camps.size===1?([...camps][0]===2?1:-1):null;
+}
+function projectMinion(m,c,outputWidth,direction,mode='world'){
+ if(![m.x,m.y,c.left,c.top,c.size].every(Number.isFinite)||c.size<=0)return null;
+ if(mode==='map')return project(m.x,m.y,c);
+ if(!Number.isFinite(outputWidth)||outputWidth<=0||![1,-1].includes(direction))return null;
+ const wx=(m.x-c.left)*2400/outputWidth,wy=(m.y-c.top)*2400/outputWidth;
+ let x=0.5+wx*direction/c.size,y=0.5-wy*direction/c.size;
+ if(c.flip){x=1-x;y=1-y;}return [x*680,y*680];
+}
+return {Decoder,parseFrame,project,minionDirection,projectMinion,MAX_BUFFER};
 });

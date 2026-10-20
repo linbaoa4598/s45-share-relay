@@ -1,8 +1,8 @@
 'use strict';
 const $=id=>document.getElementById(id),canvas=$('map'),ctx=canvas.getContext('2d');
-let socket,room='',frame=null,retry,epoch=0,lastFrame=0;
+let socket,room='',frame=null,retry,epoch=0,lastFrame=0,minionVisible=0,minionOutside=0,minionUnresolved=0;
 $('endpoint').value=(location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws';
-function clear(){frame=null;lastFrame=0;ctx.clearRect(0,0,680,680);$('heroes').textContent='暂无数据';}
+function clear(){minionVisible=0;minionOutside=0;minionUnresolved=0;frame=null;lastFrame=0;ctx.clearRect(0,0,680,680);$('heroes').textContent='暂无数据';}
 function send(m){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify(m));}
 function join(id){if(!/^(?:\d{6})?$/.test(id)){alert('请输入六位数字房间号');return;}room=id;$('room').value=id;clear();send({type:'subscribe',room});}
 function connect(){
@@ -29,7 +29,14 @@ function render(){
  function dot(x,y,color,r){if(!Number.isFinite(x)||!Number.isFinite(y))return;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle=color;ctx.fill();}
  ctx.textAlign='center';
  for(const m of frame.monsters){const [x,y]=ShareProtocol.project(m.x,m.y,w);dot(x,y,'#ffcc66',5);ctx.font='14px sans-serif';ctx.fillStyle='#ffe3a0';ctx.fillText(m.field2+'/'+m.field3,x,y-9);}
- for(const m of frame.minions){const [x,y]=ShareProtocol.project(m.x,m.y,b);dot(x,y,'#a2dba0',4);}
+ minionVisible=0;minionOutside=0;minionUnresolved=0;
+ const direction=ShareProtocol.minionDirection(frame.minions,$('minionDirection').value);
+ for(const m of frame.minions){
+  const point=ShareProtocol.projectMinion(m,b,Number($('width').value),direction,$('minionMode').value);
+  if(!point){++minionUnresolved;continue;}
+  const [x,y]=point;if(x<0||y<0||x>680||y>680){++minionOutside;continue;}
+  ++minionVisible;dot(x,y,'#b7ff9e',5);ctx.strokeStyle='#193b21';ctx.lineWidth=1.5;ctx.stroke();
+ }
  for(const h of frame.actors){
   const [x,y]=ShareProtocol.project(h.x,h.y,a,true);dot(x,y,'#89cfff',16);
   ctx.fillStyle='#14202c';ctx.font='bold 12px sans-serif';ctx.fillText(String(h.id),x,y+4);
@@ -51,9 +58,10 @@ $('calculate').onclick=()=>{
  render();
 };
 for(const group of ['actor','wild','minion'])for(const field of ['Left','Top','Size'])$(group+field).oninput=render;
-$('flip').oninput=render;
+$('flip').oninput=render;$('width').oninput=render;$('minionDirection').onchange=render;
+$('minionMode').onchange=()=>{$('minionSize').value=$('minionMode').value==='world'?100000:311.785714;render();};
 setInterval(()=>{
  if(lastFrame&&Date.now()-lastFrame>3000)clear();
- $('freshness').textContent=lastFrame?'房间 '+room+' · '+((Date.now()-lastFrame)/1000).toFixed(1)+' 秒前 · 英雄 '+frame.actors.length+' / 野怪 '+frame.monsters.length+' / 兵线 '+frame.minions.length:room?'房间 '+room+'：等待新帧（需下一帧头或发送端正常关闭才能划定完整消息）':'请选择六位数字房间号。';
+ $('freshness').textContent=lastFrame?'房间 '+room+' · '+((Date.now()-lastFrame)/1000).toFixed(1)+' 秒前 · 英雄 '+frame.actors.length+' / 野怪 '+frame.monsters.length+' / 兵线 '+frame.minions.length+'（可见 '+minionVisible+'，画布外 '+minionOutside+(minionUnresolved?'，待校准 '+minionUnresolved:'')+'）':room?'房间 '+room+'：等待新帧（需下一帧头或发送端正常关闭才能划定完整消息）':'请选择六位数字房间号。';
 },250);
 connect();

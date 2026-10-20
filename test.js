@@ -1,7 +1,7 @@
 'use strict';
 const test=require('node:test'),assert=require('node:assert/strict'),net=require('node:net');
 const {once}=require('node:events');
-const {Decoder,parseFrame,project,MAX_BUFFER}=require('./protocol'),{createBridge,optionsFromEnvironment}=require('./server');
+const {Decoder,parseFrame,project,minionDirection,projectMinion,MAX_BUFFER}=require('./protocol'),{createBridge,optionsFromEnvironment}=require('./server');
 const raw='gameData123456[==][==]105,1000,2000,8192000,0,136,136,50,0==---0,10,60,200,200==---100,100,2==120,120,1==';
 test('legacy reconstructed 9-column frame stays compatible',()=>{
  const f=parseFrame(raw);assert.equal(f.room,'123456');assert.equal(f.protocol,'original-s45');
@@ -106,4 +106,49 @@ test('lobby to battle on same TCP connection does not reconnect',async t=>{
  const bad=battle.replace('105,1000','105,broken');tcp.write(bad+battle+battle);
  await delay(40);assert.equal(tcp.destroyed,false);assert.equal(bridge.metrics.tcpFatal,0);assert.equal(bridge.metrics.rejected,1);assert.ok(bridge.metrics.accepted>=4);assert.equal(diagnostics[0].event,'frame_rejected');
  tcp.write(battle);assert.equal((await next(m=>m.type==='frame'&&m.actors.length===1)).actors[0].field10,257);
+});
+
+test('world minion projection restores sender scale, offsets and camp orientation',()=>{
+ const c={left:0,top:0,size:100000,flip:false};
+ assert.deepEqual(projectMinion({x:0,y:0},c,2400,1),[340,340]);
+ assert.deepEqual(projectMinion({x:50000,y:50000},c,2400,1),[680,0]);
+ assert.deepEqual(projectMinion({x:-50000,y:-50000},c,2400,-1),[680,0]);
+ assert.deepEqual(projectMinion({x:25100,y:-24800},{...c,left:100,top:200},1200,1),[680,680]);
+ assert.deepEqual(projectMinion({x:50000,y:50000},{...c,flip:true},2400,1),[0,680]);
+ assert.equal(minionDirection([{field3:2}]),1);assert.equal(minionDirection([{field3:1}]),-1);
+ assert.equal(minionDirection([{field3:1},{field3:2}]),null);assert.equal(minionDirection([]),null);
+ assert.equal(minionDirection([], '-1'),-1);assert.equal(projectMinion({x:1,y:1},c,0,1),null);
+ assert.equal(projectMinion({x:1,y:1},c,2400,null),null);
+ assert.deepEqual(projectMinion({x:156,y:156},{...c,size:312},2400,null,'map'),[340,340]);
+});
+test('received large minion coordinates become visible instead of outside canvas',()=>{
+ const coords=[[-2728,-3749],[46815,-31992],[-2988,-2881],[47657,-31945],[761,1660],[1488,1110],[39865,48253],[48305,40031],[40750,40699]];
+ let oldVisible=0,newVisible=0;
+ for(const [x,y]of coords){
+  const old=project(x,y,{left:0,top:0,size:311.785714,flip:false});
+  if(old.every(v=>v>=0&&v<=680))++oldVisible;
+  const next=projectMinion({x,y},{left:0,top:0,size:100000,flip:false},2400,1);
+  if(next.every(v=>v>=0&&v<=680))++newVisible;
+ }
+ assert.equal(oldVisible,0);assert.equal(newVisible,9);
+});
+
+test('actual app renderer draws nine received world-space minions',()=>{
+ const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
+ const html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8'),nodes=new Map(),arcs=[],intervals=[];
+ const ctx={clearRect(){arcs.length=0;},beginPath(){},arc(x,y,r){arcs.push([x,y,r]);},fill(){},stroke(){},fillText(){},fillRect(){}};
+ for(const tag of html.match(/<[^>]+id="[^"]+"[^>]*>/g)){
+  const id=/id="([^"]+)"/.exec(tag)[1],value=/value="([^"]*)"/.exec(tag)?.[1]||'';
+  nodes.set(id,{value,checked:false,textContent:'',replaceChildren(){},append(){},getContext(){return ctx;}});
+ }
+ nodes.get('minionMode').value='world';nodes.get('minionDirection').value='auto';
+ let connection;
+ class Socket{static OPEN=1;constructor(){this.readyState=1;connection=this;}send(){}close(){}}
+ const sandbox={document:{getElementById(id){assert.ok(nodes.has(id),'missing DOM '+id);return nodes.get(id);},createElement(){return {append(){}};}},location:{protocol:'http:',host:'localhost'},WebSocket:Socket,URL,ShareProtocol:require('./protocol'),setInterval(fn){intervals.push(fn);},setTimeout(){},clearTimeout(){},alert(){throw Error('unexpected alert');}};
+ vm.runInNewContext(fs.readFileSync(path.join(__dirname,'app.js'),'utf8'),sandbox);
+ nodes.get('room').value='123456';nodes.get('join').onclick();
+ const minions=[[-2728,-3749],[46815,-31992],[-2988,-2881],[47657,-31945],[761,1660],[1488,1110],[39865,48253],[48305,40031],[40750,40699]].map(([x,y])=>({x,y,field3:2}));
+ connection.onmessage({data:JSON.stringify({type:'frame',protocol:'original-s45',room:'123456',actors:[],monsters:[],minions})});
+ assert.equal(arcs.length,9);assert.ok(arcs.every(([x,y])=>x>=0&&x<=680&&y>=0&&y<=680));
+ intervals[0]();assert.match(nodes.get('freshness').textContent,/可见 9，画布外 0/);
 });
