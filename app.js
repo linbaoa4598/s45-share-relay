@@ -1,6 +1,16 @@
 'use strict';
 const $=id=>document.getElementById(id),canvas=$('map'),ctx=canvas.getContext('2d');
 let socket,room='',frame=null,retry,epoch=0,lastFrame=0,minionVisible=0,minionOutside=0,minionUnresolved=0;
+const portraits=new Map();
+function portrait(id){
+ if(!Number.isInteger(id)||id<1||id>9999)return null;
+ if(portraits.has(id))return portraits.get(id);
+ const entry={image:new Image(),state:'loading'};portraits.set(id,entry);
+ entry.image.decoding='async';
+ entry.image.onload=()=>{entry.state='ready';if(frame&&frame.actors.some(h=>h.id===id))render();};
+ entry.image.onerror=()=>{entry.state='failed';};
+ entry.image.src='/heroes/'+id+'.png';return entry;
+}
 $('endpoint').value=(location.protocol==='https:'?'wss://':'ws://')+location.host+'/ws';
 function clear(){minionVisible=0;minionOutside=0;minionUnresolved=0;frame=null;lastFrame=0;ctx.clearRect(0,0,680,680);$('heroes').textContent='暂无数据';}
 function send(m){if(socket?.readyState===WebSocket.OPEN)socket.send(JSON.stringify(m));}
@@ -38,14 +48,23 @@ function render(){
   ++minionVisible;dot(x,y,'#b7ff9e',5);ctx.strokeStyle='#193b21';ctx.lineWidth=1.5;ctx.stroke();
  }
  for(const h of frame.actors){
-  const [x,y]=ShareProtocol.project(h.x,h.y,a,true);dot(x,y,'#89cfff',16);
-  ctx.fillStyle='#14202c';ctx.font='bold 12px sans-serif';ctx.fillText(String(h.id),x,y+4);
+  const [x,y]=ShareProtocol.project(h.x,h.y,a,true),avatar=portrait(h.id);
+  if(avatar&&avatar.state==='ready'){
+   ctx.save();ctx.beginPath();ctx.arc(x,y,18,0,Math.PI*2);ctx.clip();ctx.drawImage(avatar.image,x-18,y-18,36,36);ctx.restore();
+   ctx.beginPath();ctx.arc(x,y,18,0,Math.PI*2);ctx.strokeStyle='#ff8796';ctx.lineWidth=2;ctx.stroke();
+  }else{
+   dot(x,y,'#f397a3',18);ctx.fillStyle='#14202c';ctx.font='bold 12px sans-serif';ctx.fillText(String(h.id),x,y+4);
+  }
   ctx.fillStyle='#111a';ctx.fillRect(x-21,y+21,42,5);ctx.fillStyle='#7bdcc0';ctx.fillRect(x-21,y+21,42*h.percent/100,5);
   const row=document.createElement('div');row.className='hero';
   const name=document.createElement('strong'),data=document.createElement('span');
   name.textContent='#'+h.id+' · '+h.hp+'/'+h.maxHp;
   data.textContent='F4: '+h.field4+' / F5: '+h.field5+' / F8: '+h.field8+' / F9: '+h.field9+(h.field10===null?'':' / F10: '+h.field10);
-  row.append(name,data);$('heroes').append(row);
+  const title=document.createElement('div');title.className='hero-title';
+  if(avatar&&avatar.state==='ready'){
+   const icon=document.createElement('img');icon.src=avatar.image.src;icon.alt='英雄 '+h.id;icon.className='hero-portrait';icon.onerror=()=>{icon.hidden=true;};title.append(icon);
+  }
+  title.append(name);row.append(title,data);$('heroes').append(row);
  }
  if(!frame.actors.length)$('heroes').textContent='本帧无上传英雄';
 }

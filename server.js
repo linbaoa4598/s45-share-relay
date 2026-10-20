@@ -35,7 +35,8 @@ function createBridge(options={}){
  const publicFiles=new Map([['/','index.html'],['/index.html','index.html'],['/app.js','app.js'],['/protocol.js','protocol.js'],['/map.png','map.png']]);
  const web=http.createServer((req,res)=>{
   if(req.url==='/healthz'){res.writeHead(200,{'Content-Type':'text/plain','Cache-Control':'no-store'});res.end('ok');return;}
-  const f=publicFiles.get(req.url.split('?')[0]);
+  const pathname=req.url.split('?')[0],avatar=/^\/heroes\/([1-9]\d{1,3})\.png$/.exec(pathname);
+  const f=publicFiles.get(pathname)||(avatar?'heroes/'+avatar[1]+'.png':null);
   if(!f){res.writeHead(404);res.end('Not found');return;}
   fs.readFile(path.join(__dirname,f),(e,data)=>{
    if(e){res.writeHead(404);res.end('Not found');return;}

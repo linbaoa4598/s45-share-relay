@@ -152,3 +152,36 @@ test('actual app renderer draws nine received world-space minions',()=>{
  assert.equal(arcs.length,9);assert.ok(arcs.every(([x,y])=>x>=0&&x<=680&&y>=0&&y<=680));
  intervals[0]();assert.match(nodes.get('freshness').textContent,/可见 9，画布外 0/);
 });
+
+test('embedded hero portraits are served safely without external hosts',async t=>{
+ const bridge=createBridge({httpPort:0,tcpPort:0});await bridge.listen();t.after(()=>bridge.close());
+ const base='http://127.0.0.1:'+bridge.web.address().port;
+ for(const id of [105,106,135,159,171,515]){
+  const response=await fetch(base+'/heroes/'+id+'.png');assert.equal(response.status,200);assert.equal(response.headers.get('content-type'),'image/png');
+  assert.deepEqual([...new Uint8Array(await response.arrayBuffer()).slice(0,8)],[137,80,78,71,13,10,26,10]);
+ }
+ for(const uri of ['/heroes/9999.png','/heroes/../server.js','/heroes/%2e%2e%2fserver.js','/heroes/foo.png'])assert.equal((await fetch(base+uri)).status,404);
+});
+
+test('actual app uses cached portraits, ID fallback and clears late image loads',()=>{
+ const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path'),nodes=new Map(),images=[],draws=[];
+ const html=fs.readFileSync(path.join(__dirname,'index.html'),'utf8');
+ const ctx={clearRect(){draws.length=0;},beginPath(){},arc(){},fill(){},stroke(){},fillText(){},fillRect(){},save(){},restore(){},clip(){},drawImage(...args){draws.push(args);}};
+ for(const tag of html.match(/<[^>]+id="[^"]+"[^>]*>/g)){
+  const id=/id="([^"]+)"/.exec(tag)[1],value=/value="([^"]*)"/.exec(tag)?.[1]||'';
+  nodes.set(id,{value,checked:false,textContent:'',replaceChildren(){},append(){},getContext(){return ctx;}});
+ }
+ nodes.get('minionMode').value='world';nodes.get('minionDirection').value='auto';
+ class Portrait{constructor(){images.push(this);}}
+ let connection;class Socket{static OPEN=1;constructor(){this.readyState=1;connection=this;}send(){}close(){}}
+ const sandbox={document:{getElementById(id){assert.ok(nodes.has(id));return nodes.get(id);},createElement(){return {append(){}};}},location:{protocol:'http:',host:'localhost'},WebSocket:Socket,URL,Image:Portrait,ShareProtocol:require('./protocol'),setInterval(){},setTimeout(){},clearTimeout(){},alert(){throw Error('unexpected alert');}};
+ vm.runInNewContext(fs.readFileSync(path.join(__dirname,'app.js'),'utf8'),sandbox);
+ nodes.get('room').value='123456';nodes.get('join').onclick();
+ const data={type:'frame',protocol:'original-s45',room:'123456',actors:[{id:171,x:136,y:136,hp:1000,maxHp:2000,percent:50,field10:null}],monsters:[],minions:[]};
+ connection.onmessage({data:JSON.stringify(data)});assert.equal(images.length,1);assert.equal(images[0].src,'/heroes/171.png');assert.equal(draws.length,0);
+ images[0].onload();assert.equal(draws.length,1);assert.equal(draws[0][0],images[0]);
+ connection.onmessage({data:JSON.stringify(data)});assert.equal(images.length,1);assert.equal(draws.length,1);
+ data.actors[0].id=9999;connection.onmessage({data:JSON.stringify(data)});assert.equal(images.length,2);images[1].onerror();
+ connection.onmessage({data:JSON.stringify(data)});assert.equal(images.length,2);assert.equal(draws.length,0);
+ nodes.get('leave').onclick();images[0].onload();assert.equal(draws.length,0);
+});
